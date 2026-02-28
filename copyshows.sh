@@ -1,30 +1,40 @@
 #!/bin/bash
 
-# Specify the source directory where the downloaded files/folders are located
-source_directory="/home/hasan/goodsamaritan/chill.institute"
+# -----------------------------
+# CONFIG
+# -----------------------------
 
-# Specify the destination directory where the TV show folders are located
-destination_directory="/home/hasan/goodsamaritan/Motherlode/tv"
+source_directory=""
+destination_directory=""
 
-# Loop through each file or folder in the source directory
+PLEX=""
+TOKEN="YOUR_TOKEN"
+TV_SECTION=6
+
+changes_made=0
+
+# -----------------------------
+# PROCESS FILES
+# -----------------------------
+
 for item in "$source_directory"/*; do
     if [ -f "$item" ] || [ -d "$item" ]; then
-        echo "Processing:"
 
-        # Extract the TV show name, season number, and episode number from the file or folder name
         filename=$(basename "$item")
+
         tv_show_name=$(echo "$filename" | sed -E 's/(.*[.])?[Ss]([0-9]+)[Ee]([0-9]+).*/\1/' | tr '.' ' ')
         season_number=$(echo "$filename" | sed -E 's/.*[Ss]([0-9]+)[Ee][0-9]+.*/\1/')
         episode_number=$(echo "$filename" | sed -E 's/.*[Ss][0-9]+[Ee]([0-9]+).*/\1/')
 
-        tv_show_name=${tv_show_name%" "}  # Remove trailing space from show name
-        tv_show_name=$(echo "$tv_show_name" | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2));}1') # Convert show name to title case
+        tv_show_name=${tv_show_name%" "}
+        tv_show_name=$(echo "$tv_show_name" | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2));}1')
 
-        echo "TV Show Name: $tv_show_name"
-        echo "Season Number: $season_number"
-        echo "Episode Number: $episode_number"
+        # Skip if parsing failed
+        if [ -z "$season_number" ] || [ -z "$episode_number" ]; then
+            continue
+        fi
 
-        # Check if the TV show folder exists in the destination directory (ignoring case sensitivity)
+        # Find existing show folder (case-insensitive)
         show_folder=""
         for folder in "$destination_directory"/*; do
             if [ -d "$folder" ]; then
@@ -36,24 +46,34 @@ for item in "$source_directory"/*; do
             fi
         done
 
-        echo "TV Show Folder: $show_folder"
-
-        # If the TV show folder doesn't exist, create it
+        # Create show folder if needed
         if [ -z "$show_folder" ]; then
             show_folder="$destination_directory/$tv_show_name"
-            mkdir "$show_folder"
-            echo "Created show folder: $show_folder"
+            mkdir -p "$show_folder"
         fi
 
-        # Find or create the season folder within the TV show folder
+        # Create season folder if needed
         season_folder="$show_folder/Season $season_number"
-        if [ ! -d "$season_folder" ]; then
-            mkdir "$season_folder"
-            echo "Created season folder: $season_folder"
-        fi
+        mkdir -p "$season_folder"
 
-        # Move the file or folder to the season folder
+        # Move file
         mv "$item" "$season_folder"
-        echo "Moved episode $episode_number to $season_folder"
+        changes_made=1
     fi
 done
+
+# -----------------------------
+# PLEX REFRESH
+# -----------------------------
+
+if [ "$changes_made" -eq 1 ]; then
+    echo "Stopping any ongoing Plex scan..."
+    curl -s "$PLEX/library/sections/$TV_SECTION/refresh?force=1&X-Plex-Token=$TOKEN" > /dev/null
+
+    echo "Triggering targeted Plex scan..."
+    curl -s "$PLEX/library/sections/$TV_SECTION/refresh?path=$destination_directory&X-Plex-Token=$TOKEN" > /dev/null
+
+    echo "Plex scan triggered."
+else
+    echo "No new files moved. Plex not triggered."
+fi
